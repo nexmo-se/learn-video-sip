@@ -1,10 +1,10 @@
-# VCR React Express Monorepo Template
+# React Express Monorepo Template
 
 A full-stack monorepo template with ReactJS frontend and ExpressJS backend, using NGROK.
 
 ## Overview
 
-This monorepo contains two separate applications:
+This monorepo contains two separate applications, however in the Vonage Dashboard it is one Application.
 
 - **Frontend** (`/frontend`): ReactJS application created with Create React App
 - **Backend** (`/backend`): ExpressJS API server
