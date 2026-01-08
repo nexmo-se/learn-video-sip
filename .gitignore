@@ -1,6 +1,7 @@
 # VCR configuration file
 /backend/vcr.yaml
 /frontend/vcr.yaml
+private.key
 
 # Logs
 logs

@@ -62,7 +62,3 @@ Use NGROK to expose the backend URL, for example: `ngrok http 3000 --domain=kitt
 
 1. Update `BACKEND_URL` in `/frontend/src/App.js` with your deployed backend URL
 2. Update `FRONTEND_URL` in `/backend/.env` with your frontend URL.
-
-## Testing your .env
-
-You can make a curl `curl http://localhost:3000/api/vonage/test` to confirm your Vonage credentials are correct.
