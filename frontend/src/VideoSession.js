@@ -321,6 +321,16 @@ const VideoSession = () => {
       // Handle remote streams
       newSession.on("streamCreated", (event) => {
         console.log("Stream created:", event.stream.id);
+        console.log("Stream details:", {
+          hasVideo: event.stream.hasVideo,
+          hasAudio: event.stream.hasAudio,
+          videoType: event.stream.videoType,
+          id: event.stream.id,
+        });
+
+        // Check if this is a SIP stream (typically audio-only, no video)
+        const isSipStream = !event.stream.hasVideo;
+
         const subscriber = newSession.subscribe(
           event.stream,
           {
@@ -338,7 +348,12 @@ const VideoSession = () => {
               console.log("✓ Subscribed to stream:", event.stream.id);
               setSubscribers((prev) => [
                 ...prev,
-                { id: event.stream.id, subscriber },
+                {
+                  id: event.stream.id,
+                  subscriber,
+                  isSip: isSipStream,
+                  createdAt: new Date(),
+                },
               ]);
             }
           }
@@ -590,9 +605,59 @@ const VideoSession = () => {
                   minHeight: "450px",
                 }}
               >
-                <Typography variant="h6" gutterBottom>
-                  Subscribers ({subscribers.length})
-                </Typography>
+                <Box
+                  sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+                >
+                  <Typography variant="h6">
+                    Subscribers ({subscribers.length})
+                  </Typography>
+                  {subscribers.some((s) => s.isSip) && (
+                    <Chip
+                      icon={<Phone style={{ fontSize: "16px" }} />}
+                      label="SIP Active"
+                      color="warning"
+                      size="small"
+                    />
+                  )}
+                </Box>
+
+                {/* Show list of active participants */}
+                {subscribers.length > 0 && (
+                  <Box
+                    sx={{
+                      mb: 2,
+                      p: 1,
+                      backgroundColor: "#f5f5f5",
+                      borderRadius: 1,
+                    }}
+                  >
+                    <Typography variant="caption" display="block" gutterBottom>
+                      Active Participants:
+                    </Typography>
+                    {subscribers.map((sub) => {
+                      const elapsed = Math.round(
+                        (Date.now() - sub.createdAt.getTime()) / 1000
+                      );
+                      return (
+                        <Typography
+                          key={sub.id}
+                          variant="body2"
+                          sx={{ mb: 0.5 }}
+                        >
+                          {sub.isSip ? "☎️" : "📹"} {sub.id.substring(0, 12)}...
+                          <Typography
+                            component="span"
+                            variant="caption"
+                            sx={{ ml: 1, color: "gray" }}
+                          >
+                            ({elapsed}s)
+                          </Typography>
+                        </Typography>
+                      );
+                    })}
+                  </Box>
+                )}
+
                 <Divider sx={{ mb: 2 }} />
                 <Box
                   ref={subscribersRef}
