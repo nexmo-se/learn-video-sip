@@ -554,9 +554,9 @@ const VideoSession = () => {
                 elevation={2}
                 sx={{
                   p: 2,
-                  height: "100%",
                   display: "flex",
                   flexDirection: "column",
+                  minHeight: "450px",
                 }}
               >
                 <Typography variant="h6" gutterBottom>
@@ -569,14 +569,12 @@ const VideoSession = () => {
                   style={{
                     backgroundColor: "#1a1a1a",
                     height: "400px",
+                    minHeight: "400px",
                     width: "100%",
                     borderRadius: "4px",
                     overflow: "hidden",
                     position: "relative",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flex: 1,
+                    display: "block",
                   }}
                 />
               </Paper>
@@ -587,9 +585,9 @@ const VideoSession = () => {
                 elevation={2}
                 sx={{
                   p: 2,
-                  height: "100%",
                   display: "flex",
                   flexDirection: "column",
+                  minHeight: "450px",
                 }}
               >
                 <Typography variant="h6" gutterBottom>
@@ -602,6 +600,7 @@ const VideoSession = () => {
                   style={{
                     backgroundColor: "#1a1a1a",
                     height: "400px",
+                    minHeight: "400px",
                     width: "100%",
                     borderRadius: "4px",
                     overflow: "hidden",
@@ -609,7 +608,6 @@ const VideoSession = () => {
                     display: "flex",
                     flexWrap: "wrap",
                     alignContent: "flex-start",
-                    flex: 1,
                   }}
                 />
               </Paper>
