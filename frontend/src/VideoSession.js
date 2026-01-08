@@ -143,8 +143,36 @@ const VideoSession = () => {
       publisherVideoElement.style.left = "0";
       publisherVideoElement.style.zIndex = "1";
 
+      // Listen for video playback events
+      const onPlay = () => {
+        console.log("✓ Publisher video element playing:", {
+          videoWidth: publisherVideoElement.videoWidth,
+          videoHeight: publisherVideoElement.videoHeight,
+          readyState: publisherVideoElement.readyState,
+          duration: publisherVideoElement.duration,
+        });
+      };
+
+      const onLoadedMetadata = () => {
+        console.log("✓ Publisher video metadata loaded:", {
+          videoWidth: publisherVideoElement.videoWidth,
+          videoHeight: publisherVideoElement.videoHeight,
+          readyState: publisherVideoElement.readyState,
+        });
+      };
+
+      publisherVideoElement.addEventListener("play", onPlay);
+      publisherVideoElement.addEventListener(
+        "loadedmetadata",
+        onLoadedMetadata
+      );
+
       container.innerHTML = "";
       container.appendChild(publisherVideoElement);
+
+      // Ensure autoplay is set
+      publisherVideoElement.autoplay = true;
+      publisherVideoElement.muted = true; // Prevent audio feedback
 
       // Check after append
       setTimeout(() => {
@@ -157,11 +185,23 @@ const VideoSession = () => {
           videoVideoHeight: publisherVideoElement.videoHeight,
           videoReadyState: publisherVideoElement.readyState,
           videoNetworkState: publisherVideoElement.networkState,
+          videoMuted: publisherVideoElement.muted,
+          videoAutoplay: publisherVideoElement.autoplay,
         });
       }, 0);
+
+      // Cleanup listeners
+      return () => {
+        publisherVideoElement.removeEventListener("play", onPlay);
+        publisherVideoElement.removeEventListener(
+          "loadedmetadata",
+          onLoadedMetadata
+        );
+      };
     };
 
-    appendElement();
+    const cleanup = appendElement();
+    return cleanup;
   }, [publisherVideoElement]);
 
   // Append subscriber video elements to DOM
@@ -508,9 +548,17 @@ const VideoSession = () => {
             </Box>
           </Paper>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={2} sx={{ mb: 4 }}>
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper elevation={2} sx={{ p: 2 }}>
+              <Paper
+                elevation={2}
+                sx={{
+                  p: 2,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
                 <Typography variant="h6" gutterBottom>
                   Publisher
                 </Typography>
@@ -518,20 +566,32 @@ const VideoSession = () => {
                 <Box
                   ref={publisherRef}
                   id="publisher-container"
-                  sx={{
+                  style={{
                     backgroundColor: "#1a1a1a",
                     height: "400px",
                     width: "100%",
-                    borderRadius: 1,
+                    borderRadius: "4px",
                     overflow: "hidden",
                     position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: 1,
                   }}
                 />
               </Paper>
             </Grid>
 
             <Grid size={{ xs: 12, md: 6 }}>
-              <Paper elevation={2} sx={{ p: 2 }}>
+              <Paper
+                elevation={2}
+                sx={{
+                  p: 2,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
                 <Typography variant="h6" gutterBottom>
                   Subscribers ({subscribers.length})
                 </Typography>
@@ -539,13 +599,17 @@ const VideoSession = () => {
                 <Box
                   ref={subscribersRef}
                   id="subscribers-container"
-                  sx={{
+                  style={{
                     backgroundColor: "#1a1a1a",
                     height: "400px",
                     width: "100%",
-                    borderRadius: 1,
+                    borderRadius: "4px",
                     overflow: "hidden",
                     position: "relative",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignContent: "flex-start",
+                    flex: 1,
                   }}
                 />
               </Paper>
