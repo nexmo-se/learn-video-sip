@@ -1,7 +1,11 @@
 # DEV
 .env
+*.key
+backend/voice-private.key
+backend/video-private.key
 DEV
 private.key
+node_modules
 
 # Logs
 logs

@@ -22,13 +22,13 @@ const vonageApiKey = process.env.VONAGE_API_KEY;
 const vonageApiSecret = process.env.VONAGE_API_SECRET;
 
 // Video API credentials
-const vonageApplicationId = process.env.VONAGE_APPLICATION_ID;
-const vonagePrivateKeyPath =
-  process.env.VONAGE_PRIVATE_KEY || process.env.VONAGE_PRIVATE_KEY_PATH;
+const vonageVideoApplicationId = process.env.VONAGE_VIDEO_APPLICATION_ID;
+const vonageVideoPrivateKey =
+  process.env.VONAGE_VIDEO_PRIVATE_KEY || process.env.VONAGE_VIDEO_PRIVATE_KEY;
 
 // Voice API credentials
 const vonageVoiceApplicationId = process.env.VONAGE_VOICE_APPLICATION_ID;
-const vonageVoicePrivateKeyPath = process.env.VONAGE_VOICE_PRIVATE_KEY;
+const vonageVoicePrivateKey = process.env.VONAGE_VOICE_PRIVATE_KEY;
 
 const lvn = process.env.LVN;
 const defaultVideoRoom = process.env.DEFAULT_VIDEO_ROOM || "main-conference";
@@ -39,50 +39,56 @@ let vonageVoice = null;
 let privateKeyContent = null;
 let voicePrivateKeyContent = null;
 
-// Read Video API private key from file
-if (vonagePrivateKeyPath) {
-  try {
-    const keyPath = path.resolve(__dirname, vonagePrivateKeyPath);
-    console.log("Attempting to load Video API private key from:", keyPath);
-    privateKeyContent = fs.readFileSync(keyPath, "utf8");
-    console.log("✓ Video API private key loaded from file");
-    console.log("Private key length:", privateKeyContent.length);
-  } catch (error) {
-    console.error(
-      "✗ Failed to read Video API private key file:",
-      error.message
-    );
-  }
-} else {
-  console.warn("⚠ No Video API private key path specified");
-}
+// Read Video and Voice API private key files
+try {
+  if (vonageVideoPrivateKey) {
+    // Resolve file path relative to __dirname (backend directory)
+    const videoKeyPath = vonageVideoPrivateKey.startsWith("/")
+      ? vonageVideoPrivateKey
+      : path.join(__dirname, vonageVideoPrivateKey);
 
-// Read Voice API private key from file
-if (vonageVoicePrivateKeyPath) {
-  try {
-    const keyPath = path.resolve(__dirname, vonageVoicePrivateKeyPath);
-    console.log("Attempting to load Voice API private key from:", keyPath);
-    voicePrivateKeyContent = fs.readFileSync(keyPath, "utf8");
-    console.log("✓ Voice API private key loaded from file");
-  } catch (error) {
-    console.error(
-      "✗ Failed to read Voice API private key file:",
-      error.message
-    );
+    if (fs.existsSync(videoKeyPath)) {
+      privateKeyContent = fs.readFileSync(videoKeyPath, "utf8");
+      console.log("✓ Loaded Video API private key from:", videoKeyPath);
+    } else {
+      // Treat as raw key content if file doesn't exist
+      privateKeyContent = vonageVideoPrivateKey;
+      console.log("✓ Loaded Video API private key from environment variable");
+    }
+  } else {
+    console.warn("⚠ No Video API private key path specified");
   }
-} else {
-  console.warn("⚠ No Voice API private key path specified");
+
+  if (vonageVoicePrivateKey) {
+    // Resolve file path relative to __dirname (backend directory)
+    const voiceKeyPath = vonageVoicePrivateKey.startsWith("/")
+      ? vonageVoicePrivateKey
+      : path.join(__dirname, vonageVoicePrivateKey);
+
+    if (fs.existsSync(voiceKeyPath)) {
+      voicePrivateKeyContent = fs.readFileSync(voiceKeyPath, "utf8");
+      console.log("✓ Loaded Voice API private key from:", voiceKeyPath);
+    } else {
+      // Treat as raw key content if file doesn't exist
+      voicePrivateKeyContent = vonageVoicePrivateKey;
+      console.log("✓ Loaded Voice API private key from environment variable");
+    }
+  } else {
+    console.warn("⚠ No Voice API private key path specified");
+  }
+} catch (error) {
+  console.error("✗ Failed to read private key files:", error.message);
 }
 
 // Initialize Video API SDK
-if (vonageApplicationId && privateKeyContent) {
+if (vonageVideoApplicationId && privateKeyContent) {
   try {
     console.log("Initializing Vonage Video API SDK with:");
-    console.log("- Application ID:", vonageApplicationId);
+    console.log("- Application ID:", vonageVideoApplicationId);
     console.log("- Has Private Key:", !!privateKeyContent);
 
     const auth = new Auth({
-      applicationId: vonageApplicationId,
+      applicationId: vonageVideoApplicationId,
       privateKey: privateKeyContent,
     });
     vonage = new Vonage(auth);
@@ -95,8 +101,9 @@ if (vonageApplicationId && privateKeyContent) {
   }
 } else {
   console.warn("⚠ Vonage Video API credentials not found");
-  if (!vonageApplicationId) console.warn("  Missing: VONAGE_APPLICATION_ID");
-  if (!privateKeyContent) console.warn("  Missing: VONAGE_PRIVATE_KEY");
+  if (!vonageVideoApplicationId)
+    console.warn("  Missing: VONAGE_VIDEO_APPLICATION_ID");
+  if (!privateKeyContent) console.warn("  Missing: VONAGE_VIDEO_PRIVATE_KEY");
 }
 
 // Initialize Voice API SDK
@@ -173,7 +180,7 @@ app.post("/api/video/session", async (req, res) => {
       success: true,
       data: {
         sessionId: session.sessionId,
-        applicationId: vonageApplicationId,
+        applicationId: vonageVideoApplicationId,
       },
     });
   } catch (error) {
@@ -201,7 +208,7 @@ app.post("/api/video/token", async (req, res) => {
 
     console.log("Generating token for:");
     console.log("- Session ID:", sessionId);
-    console.log("- Application ID:", vonageApplicationId);
+    console.log("- Application ID:", vonageVideoApplicationId);
     console.log("- Has Private Key:", !!privateKeyContent);
 
     const token = vonage.video.generateClientToken(sessionId, {
@@ -217,7 +224,7 @@ app.post("/api/video/token", async (req, res) => {
       data: {
         token,
         sessionId,
-        apiKey: vonageApplicationId,
+        apiKey: vonageVideoApplicationId,
       },
     });
   } catch (error) {
@@ -530,11 +537,6 @@ app.get("/webhooks/voice/answer", async (req, res) => {
           {
             type: "sip",
             uri: sipUri,
-            headers: {
-              "X-Session-Id": videoSessionId,
-              "X-Token": sipToken,
-              "X-Caller": callerNumber,
-            },
           },
         ],
         eventUrl: [`${publicWebhookUrl}/webhooks/voice/events`],
@@ -667,6 +669,23 @@ app.post("/api/video/sip-monitoring", (req, res) => {
   res.status(200).json({ success: true });
 });
 
+// Video API SIP Monitoring Callback for SIP Interconnect
+app.post("/video/sip/callback", (req, res) => {
+  console.log("\n[Video API SIP Monitoring] Callback received");
+  console.log(
+    "[Video API SIP Monitoring] Headers:",
+    JSON.stringify(req.headers, null, 2)
+  );
+  console.log(
+    "[Video API SIP Monitoring] Query params:",
+    JSON.stringify(req.query, null, 2)
+  );
+  console.log(
+    "[Video API SIP Monitoring] Body:",
+    JSON.stringify(req.body, null, 2)
+  );
+  res.status(200).json({ success: true });
+});
 app.listen(port, () => {
   console.log(`App listening on port ${port}`);
   console.log(`LVN configured: ${lvn || "Not set"}`);
