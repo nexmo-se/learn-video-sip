@@ -1,5 +1,8 @@
 import { Vonage } from "@vonage/server-sdk";
 import { Auth } from "@vonage/auth";
+import { tokenGenerate } from "@vonage/jwt";
+import { Conversation, NCCOBuilder, Talk } from "@vonage/voice";
+import { Video } from "@vonage/video";
 import express from "express";
 import axios from "axios";
 import path from "path";
@@ -31,11 +34,18 @@ const vonageVoiceApplicationId = process.env.VONAGE_VOICE_APPLICATION_ID;
 const vonageVoicePrivateKey = process.env.VONAGE_VOICE_PRIVATE_KEY;
 
 const lvn = process.env.LVN;
+const conferenceNumber = process.env.CONFERENCE_NUMBER || lvn;
 const defaultVideoRoom = process.env.DEFAULT_VIDEO_ROOM || "main-conference";
+const sipTrunkDomain = process.env.VONAGE_SIP_TRUNK_DOMAIN;
 const publicWebhookUrl = process.env.PUBLIC_WEBHOOK_URL;
+
+// For Outbound SIP calls from Voice API to Video API
+const sipTrunkUsername = process.env.VONAGE_SIP_USERNAME;
+const sipTrunkPassword = process.env.VONAGE_SIP_PASSWORD;
 
 let vonage = null;
 let vonageVoice = null;
+let vonageVideo = null;
 let privateKeyContent = null;
 let voicePrivateKeyContent = null;
 
@@ -87,11 +97,10 @@ if (vonageVideoApplicationId && privateKeyContent) {
     console.log("- Application ID:", vonageVideoApplicationId);
     console.log("- Has Private Key:", !!privateKeyContent);
 
-    const auth = new Auth({
+    vonageVideo = new Video({
       applicationId: vonageVideoApplicationId,
       privateKey: privateKeyContent,
     });
-    vonage = new Vonage(auth);
     console.log("✓ Vonage Video API SDK initialized successfully");
   } catch (error) {
     console.error(
@@ -156,15 +165,15 @@ app.use(express.static("public"));
 // Create a new Video API session
 app.post("/api/video/session", async (req, res) => {
   try {
-    if (!vonage) {
+    if (!vonageVideo) {
       return res
         .status(500)
-        .json({ success: false, error: "Vonage SDK not initialized" });
+        .json({ success: false, error: "Vonage Video SDK not initialized" });
     }
 
     const { archiveMode = "manual" } = req.body;
 
-    const session = await vonage.video.createSession({
+    const session = await vonageVideo.createSession({
       archiveMode,
       mediaMode: "routed",
     });
@@ -192,10 +201,10 @@ app.post("/api/video/session", async (req, res) => {
 // Generate a token for a video session
 app.post("/api/video/token", async (req, res) => {
   try {
-    if (!vonage) {
+    if (!vonageVideo) {
       return res
         .status(500)
-        .json({ success: false, error: "Vonage SDK not initialized" });
+        .json({ success: false, error: "Vonage Video SDK not initialized" });
     }
 
     const { sessionId, role = "publisher", data = "" } = req.body;
@@ -211,7 +220,7 @@ app.post("/api/video/token", async (req, res) => {
     console.log("- Application ID:", vonageVideoApplicationId);
     console.log("- Has Private Key:", !!privateKeyContent);
 
-    const token = vonage.video.generateClientToken(sessionId, {
+    const token = vonageVideo.generateClientToken(sessionId, {
       role,
       data,
       expireTime: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
@@ -236,10 +245,10 @@ app.post("/api/video/token", async (req, res) => {
 // Dial a SIP URI to connect phone call to video session
 app.post("/api/video/dial", async (req, res) => {
   try {
-    if (!vonage) {
+    if (!vonageVideo) {
       return res
         .status(500)
-        .json({ success: false, error: "Vonage SDK not initialized" });
+        .json({ success: false, error: "Vonage Video SDK not initialized" });
     }
 
     const { sessionId, token } = req.body;
@@ -261,7 +270,7 @@ app.post("/api/video/dial", async (req, res) => {
     // Create SIP dial request
     const sipUri = `sip:${lvn}@sip.nexmo.com`;
 
-    const dialResult = await vonage.video.initiateSIPCall(sessionId, token, {
+    const dialResult = await vonageVideo.initiateSIPCall(sessionId, token, {
       sip: {
         uri: sipUri,
         from: lvn,
@@ -325,11 +334,11 @@ app.post("/api/video/sip-inbound", async (req, res) => {
       });
     }
 
-    if (!vonage || !vonageApplicationId) {
-      console.error("[SIP Webhook] ❌ Vonage SDK not initialized");
+    if (!vonageVideo) {
+      console.error("[SIP Webhook] ❌ Vonage Video SDK not initialized");
       return res.status(500).json({
         success: false,
-        error: "Vonage SDK not initialized",
+        error: "Vonage Video SDK not initialized",
       });
     }
 
@@ -341,7 +350,7 @@ app.post("/api/video/sip-inbound", async (req, res) => {
 
     // Generate a token for the SIP caller with publisher role
     // This allows them to both publish audio and receive others' audio
-    const sipToken = vonage.video.generateClientToken(sessionId, {
+    const sipToken = vonageVideo.generateClientToken(sessionId, {
       role: "publisher",
       data: JSON.stringify({
         type: "sip_caller",
@@ -436,34 +445,14 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-// Webhook endpoint for SIP events (if needed in future)
-// Currently not used - Vonage Video API handles streaming automatically
-// app.post("/api/webhooks/sip", async (req, res) => { ... });
-
-// Get LVN information
-app.get("/api/sip/lvn", async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      data: {
-        lvn: lvn || "Not configured",
-        dialInstructions: lvn
-          ? `Dial ${lvn} to join the video session`
-          : "LVN not configured in environment variables",
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // ========================================
 // VOICE API WEBHOOKS FOR LVN DIAL-IN
 // ========================================
 
 // Voice API Answer Webhook
 // Called when someone dials your LVN
-app.get("/webhooks/voice/answer", async (req, res) => {
+// Routes inbound voice calls to video session
+app.get("/sip/vapi/answer", async (req, res) => {
   console.log("\n[Voice Answer] Incoming call to LVN");
   console.log("[Voice Answer] From:", req.query.from);
   console.log("[Voice Answer] To:", req.query.to);
@@ -473,17 +462,18 @@ app.get("/webhooks/voice/answer", async (req, res) => {
   const callerNumber = req.query.from;
 
   try {
-    // Option 1: Simple - always join the default room
+    // Always route to the default video room
     const roomName = defaultVideoRoom;
 
-    // Get or create Video session for this room
+    // Get or create Video session and Conversation for this room
     let videoSessionId = roomSessions.get(roomName);
+    let conversationName = `video-room-${roomName}`;
 
     if (!videoSessionId) {
       console.log(
         `[Voice Answer] Creating new Video session for room: ${roomName}`
       );
-      const session = await vonage.video.createSession({
+      const session = await vonageVideo.createSession({
         archiveMode: "manual",
         mediaMode: "routed",
       });
@@ -501,71 +491,151 @@ app.get("/webhooks/voice/answer", async (req, res) => {
     callMappings.set(callUuid, {
       videoSessionId,
       roomName,
+      conversationName,
       callerNumber,
       status: "connecting",
       created: new Date(),
     });
 
-    // Generate a token for the SIP connection
-    const sipToken = vonage.video.generateClientToken(videoSessionId, {
-      role: "publisher",
-      data: JSON.stringify({
-        type: "phone_caller",
-        phone: callerNumber,
-      }),
-    });
-
-    // Build the SIP URI for Video API
-    // The Video API will dial out to this SIP URI
-    const sipUri = `sip:${videoSessionId}@sip.video.vonage.com`;
-
     console.log(
       `[Voice Answer] Routing call to Video session: ${videoSessionId}`
     );
-    console.log(`[Voice Answer] SIP URI: ${sipUri}`);
+    console.log(`[Voice Answer] Conversation name: ${conversationName}`);
 
-    // NCCO (Nexmo Call Control Object) to connect the call
-    const ncco = [
-      {
-        action: "talk",
-        text: `Welcome to the video conference. Connecting you now.`,
-        bargeIn: true,
-      },
-      {
-        action: "connect",
-        endpoint: [
-          {
-            type: "sip",
-            uri: sipUri,
-          },
-        ],
-        eventUrl: [`${publicWebhookUrl}/webhooks/voice/events`],
-      },
-    ];
+    // Generate token for Video session SIP connection
+    const videoToken = vonageVideo.generateClientToken(videoSessionId, {
+      role: "subscriber",
+      data: JSON.stringify({
+        callUuid,
+        callerNumber,
+        isInboundSIP: true,
+      }),
+    });
 
-    res.json(ncco);
+    // Asynchronously dial the conversation from Video API
+    initiateVideoSIPCall(
+      videoSessionId,
+      videoToken,
+      conversationName,
+      callUuid
+    );
+
+    // Return NCCO with Conversation to keep voice call active
+    // The video session will dial into this conversation
+    const ncco = new NCCOBuilder();
+    ncco.addAction(
+      new Talk("Please wait while we connect you to the video session.")
+    );
+    ncco.addAction(
+      new Conversation(
+        conversationName,
+        null,
+        true,
+        true,
+        false,
+        null,
+        null,
+        false
+      )
+    );
+
+    res.json(ncco.build());
   } catch (error) {
     console.error("[Voice Answer] Error:", error);
 
     // Fallback NCCO to inform caller of error
-    res.json([
-      {
-        action: "talk",
-        text: "Sorry, we could not connect you to the video session. Please try again later.",
-      },
-    ]);
+    const ncco = new NCCOBuilder();
+    ncco.addAction(
+      new Talk(
+        "Sorry, we could not connect you to the video session. Please try again later."
+      )
+    );
+    res.json(ncco.build());
   }
 });
 
+// Helper function to dial video session into voice conversation
+async function initiateVideoSIPCall(
+  sessionId,
+  token,
+  conversationName,
+  callUuid
+) {
+  try {
+    console.log(
+      `[Video SIP] Initiating SIP call for session ${sessionId} into conversation: ${conversationName}`
+    );
+    console.log("[Video SIP] Token length:", token.length);
+    console.log("[Video SIP] Conference number:", conferenceNumber);
+
+    // Use the Vonage SDK's intiateSIPCall method (note: SDK has typo in method name)
+    // Method signature: intiateSIPCall(sessionId, options)
+    // where options = { token, sip: { uri, from, secure } }
+    const options = {
+      token,
+      sip: {
+        uri: `sip:${conferenceNumber}@sip.nexmo.com`,
+        from: `${conferenceNumber}@sip.nexmo.com`,
+        secure: false,
+      },
+    };
+
+    console.log(
+      "[Video SIP] Request options:",
+      JSON.stringify(options, null, 2)
+    );
+
+    const dialResult = await vonageVideo.intiateSIPCall(sessionId, options);
+
+    console.log("[Video SIP] SIP call initiated successfully:", dialResult);
+
+    // Update call mapping with connection details
+    const callMapping = callMappings.get(callUuid);
+    if (callMapping) {
+      callMapping.connectionId = dialResult.connectionId;
+      callMapping.streamId = dialResult.streamId;
+      callMapping.status = "connected";
+      callMappings.set(callUuid, callMapping);
+    }
+  } catch (error) {
+    console.error("[Video SIP] SIP call initiation failed:", error.message);
+    console.error("[Video SIP] Error name:", error.name);
+
+    // Try to parse the response body for the actual error
+    if (error.response) {
+      console.error("[Video SIP] Response status:", error.response.status);
+      console.error("[Video SIP] Response headers:", error.response.headers);
+
+      if (error.response.body) {
+        try {
+          const bodyText =
+            (await error.response.text?.()) || error.response.body;
+          console.error("[Video SIP] Response body:", bodyText);
+        } catch (e) {
+          console.error("[Video SIP] Could not parse response body");
+        }
+      }
+    }
+
+    if (error.response?.data) {
+      console.error("[Video SIP] Error details (data):", error.response.data);
+    }
+    if (error.response?.status) {
+      console.error("[Video SIP] Status code:", error.response.status);
+    }
+    console.error("[Video SIP] Stack trace:", error.stack);
+  }
+}
+
 // Voice API Answer Webhook (POST version for some configurations)
-app.post("/webhooks/voice/answer", async (req, res) => {
+app.post("/sip/vapi/answer", async (req, res) => {
   console.log("\n[Voice Answer POST] Incoming call to LVN");
   console.log("[Voice Answer POST] Body:", req.body);
 
   // Forward to GET handler
   req.query = req.body;
   return app._router.handle(
-    { ...req, method: "GET", url: "/webhooks/voice/answer" },
+    { ...req, method: "GET", url: "/sip/vapi/answer" },
     res,
     () => {}
   );
@@ -573,11 +643,11 @@ app.post("/webhooks/voice/answer", async (req, res) => {
 
 // Voice API Event Webhook
 // Receives call status updates
-app.post("/webhooks/voice/events", (req, res) => {
+app.all("/sip/vapi/events", (req, res) => {
   console.log("\n[Voice Event]", req.body.status || req.body);
 
-  const callUuid = req.body.uuid;
-  const status = req.body.status;
+  const callUuid = req.body.uuid || req.query.uuid;
+  const status = req.body.status || req.query.status;
 
   if (callMappings.has(callUuid)) {
     const mapping = callMappings.get(callUuid);
@@ -595,79 +665,6 @@ app.post("/webhooks/voice/events", (req, res) => {
 // ========================================
 // VIDEO API SIP WEBHOOK
 // ========================================
-
-// Video API SIP Monitoring Webhook
-// Called when Video API needs to route SIP calls
-app.post("/webhooks/video/sip", (req, res) => {
-  console.log("\n[Video SIP] Webhook received");
-  console.log("[Video SIP] Body:", JSON.stringify(req.body, null, 2));
-
-  const { sessionId, session_id, from, to, connection_id } = req.body || {};
-  const actualSessionId = sessionId || session_id;
-
-  if (actualSessionId) {
-    console.log(`[Video SIP] Call connected to session: ${actualSessionId}`);
-    console.log(`[Video SIP] From: ${from}`);
-    console.log(`[Video SIP] To: ${to}`);
-    console.log(`[Video SIP] Connection ID: ${connection_id}`);
-
-    // Update session with SIP connection info
-    if (activeSessions.has(actualSessionId)) {
-      const session = activeSessions.get(actualSessionId);
-      session.sipConnections.push({
-        connectionId: connection_id,
-        from,
-        to,
-        created: new Date(),
-      });
-    }
-  }
-
-  res.status(200).json({ success: true });
-});
-
-// Video API SIP Monitoring Webhook (legacy endpoint)
-app.post("/api/video/sip-monitoring", (req, res) => {
-  console.log("\n[Video API SIP Monitoring] Webhook received");
-  console.log(
-    "[Video API SIP Monitoring] Headers:",
-    JSON.stringify(req.headers, null, 2)
-  );
-  console.log(
-    "[Video API SIP Monitoring] Query params:",
-    JSON.stringify(req.query, null, 2)
-  );
-  console.log(
-    "[Video API SIP Monitoring] Body:",
-    JSON.stringify(req.body, null, 2)
-  );
-
-  const { sessionId, session_id, from, to, connection_id } =
-    req.body || req.query;
-
-  if (sessionId || session_id) {
-    console.log(
-      `[Video API SIP Monitoring] ✓ Call routed to session: ${
-        sessionId || session_id
-      }`
-    );
-    console.log(`[Video API SIP Monitoring]   From: ${from}`);
-    console.log(`[Video API SIP Monitoring]   To: ${to}`);
-    console.log(`[Video API SIP Monitoring]   Connection ID: ${connection_id}`);
-  } else {
-    console.log(
-      "[Video API SIP Monitoring] ⚠️  No session ID in webhook payload"
-    );
-    console.log("[Video API SIP Monitoring] Using first active session");
-    for (const [sid] of activeSessions.entries()) {
-      console.log(`[Video API SIP Monitoring]   Found session: ${sid}`);
-    }
-  }
-
-  // This endpoint acknowledges receipt of SIP call events
-  // Vonage automatically handles stream creation
-  res.status(200).json({ success: true });
-});
 
 // Video API SIP Monitoring Callback for SIP Interconnect
 app.post("/video/sip/callback", (req, res) => {
